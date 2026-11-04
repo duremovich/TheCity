@@ -23,6 +23,12 @@
 //! lot at its storey's z (lots.rs: no more ground-plus-formula), a lift rider in a glass car in a shaft at the lot's
 //! middle, a stairs climber walking round the core a turn a storey; the HUD says what the subject is doing (climb,
 //! ride, storey, z, lot); a crowd standing on one street tile spreads over the walkable ground round it (`Sim::spread`).
+//! Motion V2 (films v2_*): a body through a door inside a pair is one walk, along the street to the building's edge and
+//! on inside to its indoor spot, or out the same way (`Sim::door_path`, `OPEN-308`), shown inside where the cut opens;
+//! walkers between the same two tiles take lanes across their way (`[view] lane_gap_m`); the subject's street fight is
+//! staged round it (`fight_gap_m`, `fight_circle_deg_s`, `OPEN-314`); the click way's drawn walk is held within a tile of
+//! the sim's place and never behind the frames (`way_lead_tiles`, `OPEN-315`); a body's act picks its posture (asleep
+//! lies, a sitting Use sits: `pose_of`).
 //! `--watch-vehicle INDEX` (0: the fullest train) puts the camera on a vehicle while the subject drives the ring.
 
 use crate::data::Layers;
@@ -58,6 +64,26 @@ pub struct Agent {
     pub rect: Option<[f32; 4]>,
     /// V4: on a climb, (from, to, by the lift)
     pub climb: Option<(u8, u8, bool)>,
+    /// Motion V2: the posture its act asks for (`POSE_STAND`, `POSE_SIT`: a sitting Use or jacked in, `POSE_LIE`:
+    /// asleep)
+    pub pose: u8,
+}
+
+/// Motion V2: an agent's posture (`Agent::pose`).
+pub const POSE_STAND: u8 = 0;
+pub const POSE_SIT: u8 = 1;
+pub const POSE_LIE: u8 = 2;
+
+/// Motion V2: the posture of a Use (the sim's `ActionKind`): asleep lies, these sit (on the floor: there are no chairs
+/// in the view), the rest stand.
+fn pose_of(act: &citysim::view::ViewAct) -> u8 {
+    use citysim::goap::actions::ActionKind as K;
+    match act {
+        citysim::view::ViewAct::Use { kind: K::Sleep, .. } => POSE_LIE,
+        citysim::view::ViewAct::Use { kind: K::Rest | K::Drink | K::EatAtHome | K::EatFromInventory | K::Beg | K::ServeTime, .. }
+        | citysim::view::ViewAct::JackedIn { .. } => POSE_SIT,
+        _ => POSE_STAND,
+    }
 }
 
 #[derive(Clone)]
@@ -171,6 +197,17 @@ pub struct Sim {
     pub motion: crate::motion::Motion,
     pub slot_cache: HashMap<((i32, i32), usize), Vec<Vec2>>,
     pub way_path: Option<(u64, Vec<[f32; 2]>)>,
+    /// Motion V2 (`OPEN-314`): each fighter's last mark (the body it struck or was struck by), faced between beats
+    pub fight_mark: HashMap<u64, u64>,
+    /// Motion V2: the view tick the subject's street fight was first drawn at (its circling's start)
+    pub fight_t0: Option<f64>,
+    /// Motion V2: the pair's strides (`simthread::Published::strides`), older and newer
+    pub strides: [HashMap<u64, f32>; 2],
+    /// Motion V2 (`OPEN-309`): where each El rider was drawn last (its seat), for the walk off the car
+    pub seat_at: HashMap<u64, Vec3>,
+    /// Motion V2: S2's `[combat] stir_tiles` (`simthread::Static`): a body standing this near the subject's fight
+    /// watches it (faces it)
+    pub stir_tiles: u16,
 }
 
 /// A 64-bit mix (splitmix64's finaliser): the per-id picks.
@@ -237,6 +274,7 @@ impl SimFrame {
                     ViewAct::Climb { from, to, lift, .. } => Some((from, to, lift)),
                     _ => None,
                 },
+                pose: pose_of(&a.act),
             })
             .collect();
         let vehicles = f
@@ -297,6 +335,60 @@ fn along(from: [f32; 2], ahead: &[[f32; 2]], to: [f32; 2], u: f32) -> ([f32; 2],
         return (if u < 0.5 { from } else { to }, true);
     };
     (walk_along(from, &ahead[..=end], u, None), false)
+}
+
+/// Motion V2: a polyline's length and its point `s` along it (clamped).
+fn poly_len(pts: &[Vec2]) -> f32 {
+    pts.windows(2).map(|w| w[0].distance(w[1])).sum()
+}
+
+fn poly_at(pts: &[Vec2], s: f32) -> Vec2 {
+    let mut left = s.max(0.0);
+    for w in pts.windows(2) {
+        let l = w[0].distance(w[1]);
+        if left <= l && l > 0.0 {
+            return w[0].lerp(w[1], left / l);
+        }
+        left -= l;
+    }
+    *pts.last().unwrap_or(&Vec2::ZERO)
+}
+
+/// Motion V2 (`OPEN-315`): how far along the polyline `pts` (tiles) the point nearest `p` lies.
+fn arc_at(pts: &[[f32; 2]], p: [f32; 2]) -> f32 {
+    let p = Vec2::from(p);
+    let (mut best, mut acc) = ((f32::MAX, 0.0f32), 0.0f32);
+    for w in pts.windows(2) {
+        let (a, b) = (Vec2::from(w[0]), Vec2::from(w[1]));
+        let ab = b - a;
+        let l = ab.length();
+        let k = if l > 0.0 { ((p - a).dot(ab) / (l * l)).clamp(0.0, 1.0) } else { 0.0 };
+        let d = (a + ab * k).distance(p);
+        if d < best.0 {
+            best = (d, acc + k * l);
+        }
+        acc += l;
+    }
+    best.1
+}
+
+/// Motion V2 (`OPEN-308`): a rect in metres `[x0, y0, x1, y1]`: is `p` inside it, and the point of its edge nearest `p`.
+fn in_area(r: [f32; 4], p: Vec2) -> bool {
+    p.x >= r[0] && p.x <= r[2] && p.y >= r[1] && p.y <= r[3]
+}
+
+fn area_edge(r: [f32; 4], p: Vec2) -> Vec2 {
+    if !in_area(r, p) {
+        return Vec2::new(p.x.clamp(r[0], r[2]), p.y.clamp(r[1], r[3]));
+    }
+    let d = [p.x - r[0], r[2] - p.x, p.y - r[1], r[3] - p.y];
+    let k = (0..4).min_by(|&i, &j| d[i].total_cmp(&d[j])).unwrap_or(0);
+    match k {
+        0 => Vec2::new(r[0], p.y),
+        1 => Vec2::new(r[2], p.y),
+        2 => Vec2::new(p.x, r[1]),
+        _ => Vec2::new(p.x, r[3]),
+    }
 }
 
 /// The point `u` (0..1) of the way `from` then `pts` (or, with `tiles`, that many tiles along it, clamped).
@@ -419,6 +511,7 @@ impl Sim {
                             let n = |k: &str| x[k].as_u64().unwrap_or(0).min(255) as u8;
                             (n("from"), n("to"), x["lift"].as_bool().unwrap_or(false))
                         }),
+                        pose: POSE_STAND,
                     }
                 })
                 .collect();
@@ -491,6 +584,11 @@ impl Sim {
             motion: Default::default(),
             slot_cache: HashMap::new(),
             way_path: None,
+            fight_mark: HashMap::new(),
+            fight_t0: None,
+            strides: Default::default(),
+            seat_at: HashMap::new(),
+            stir_tiles: 8,
             rails,
             lots: crate::lots::Lots::load(chunk_dir),
             cfg: citysim::config::ViewCfg::default(),
@@ -542,6 +640,11 @@ impl Sim {
             motion: Default::default(),
             slot_cache: HashMap::new(),
             way_path: None,
+            fight_mark: HashMap::new(),
+            fight_t0: None,
+            strides: Default::default(),
+            seat_at: HashMap::new(),
+            stir_tiles: 8,
             rails,
             lots: crate::lots::Lots::load(chunk_dir),
             cfg: citysim::config::ViewCfg::default(),
@@ -572,9 +675,11 @@ impl Sim {
                 self.line_names = st.lines.clone();
                 self.tile_m = st.tile_m;
                 self.y1 = st.north_m;
+                self.stir_tiles = st.stir_tiles;
             }
             let older = prev.as_ref().unwrap_or(&latest);
             self.frames = vec![SimFrame::from_view(&older.frame), SimFrame::from_view(&latest.frame)];
+            self.strides = [older.strides.clone(), latest.strides.clone()];
             self.live_seq = latest.seq;
             self.subject = Some(ekey(latest.subject));
             self.caption = latest.caption.clone();
@@ -664,6 +769,48 @@ impl Sim {
         }
         let p = self.indoor_xy(a);
         (p, stream.ground_z(p.x, p.y).unwrap_or(0.0) + Sim::storey_z(floor), None)
+    }
+
+    /// Motion V2 (`OPEN-308`): a body through a door between the pair's frames, drawn as one walk: going in, along
+    /// the street way to the building's edge (the export lot's part on the ground storey, else the sim's rect) where
+    /// the way first crosses it (else the edge nearest the last street place), then on inside to the spot it is drawn
+    /// at indoors (`indoor_place`); coming out the same backwards, from its drawn indoor spot (the core after a climb).
+    /// The sim's own interior tile (wherever the sim puts a body that came in: `OPEN-307`) is never walked to. The
+    /// way in metres, the edge's index on it, the indoor z, the area.
+    fn door_path(&self, older: &Agent, newer: &Agent, going_in: bool, stream: &Stream) -> (Vec<Vec2>, usize, f32, [f32; 4]) {
+        let inner = if going_in { newer } else { older };
+        let f = if going_in { 0.0 } else { inner.floor };
+        let (spot, z_in, pl) = self.indoor_place(inner, f, !going_in && inner.climb.is_some(), stream);
+        let area =
+            pl.map_or_else(|| inner.rect.map_or([spot.x - 1.0, spot.y - 1.0, spot.x + 1.0, spot.y + 1.0], |r| self.rect_m(r)), |p| p.area);
+        // the street way, tiles: the older place, its way ahead up to the newer one
+        let mut way: Vec<[f32; 2]> = vec![older.t];
+        let end = older.ahead.iter().position(|p| *p == newer.t);
+        way.extend(older.ahead.iter().take(end.map_or(older.ahead.len(), |e| e + 1)).copied());
+        if way.last() != Some(&newer.t) && !going_in {
+            way.push(newer.t);
+        }
+        let way: Vec<Vec2> = way.iter().map(|t| self.metres(*t, 0, false)).collect();
+        // a place of the way is the building's when it lies in the drawn area or the sim's rect (the sim's interior
+        // tiles: the export's lot and the sim's rect disagree by a tile or more), the street's else
+        let rect = inner.rect.map(|r| self.rect_m(r));
+        let ins = |p: &Vec2| in_area(area, *p) || rect.is_some_and(|r| in_area(r, *p));
+        if going_in {
+            // the street part: up to the first place inside, then the area's edge nearest the last street place
+            let k = way.iter().position(ins).unwrap_or(way.len()).max(1);
+            let mut path = way[..k].to_vec();
+            let last = *path.last().unwrap();
+            path.push(area_edge(area, last));
+            let edge = path.len() - 1;
+            path.push(spot);
+            (path, edge, z_in, area)
+        } else {
+            // the street part: from the first place outside on (the door's street tile), from the area's edge nearest it
+            let k = way.iter().position(|p| !ins(p)).unwrap_or(way.len() - 1);
+            let mut path = vec![spot, area_edge(area, way[k])];
+            path.extend(way[k..].iter().copied());
+            (path, 1, z_in, area)
+        }
     }
 
     /// V4: the rail deck nearest `p` within 20 m: (its index, the plan distance along it).
@@ -961,10 +1108,6 @@ pub fn update_sim(
     // the newer frame's bodies, each lerped from its place in the older one along the older's way ahead (at u = 1
     // exactly the newer frame: a bench's shot shows its tick)
     let prev_a: HashMap<u64, ([f32; 2], Vec<[f32; 2]>)> = sim.frames[i].agents.iter().map(|a| (a.id, (a.t, a.ahead.clone()))).collect();
-    // T2 (docs/TIME_MODEL.md § 4): who was on the street in the older frame (a body that went in at a door between the
-    // two is drawn walking to the door, then hidden)
-    let prev_out: HashMap<u64, f32> =
-        sim.frames[i].agents.iter().filter(|a| !a.indoors && a.aboard.is_none()).map(|a| (a.id, a.floor)).collect();
     let mut no_way = 0usize;
     // T2 (§ 5): the view's game time (the subject's click way is walked in it), the way, and whether it ends here
     let pace = sim.live.as_ref().map_or(0.0, |l| l.tick_rate());
@@ -1023,6 +1166,41 @@ pub fn update_sim(
         standing.entry((a.t[0] as i32, a.t[1] as i32)).or_default().push(a.id);
     }
     let slots = sim.slots(&stream, &standing);
+    // Motion V2: the older frame's bodies whole (a door's walk reads the older place's building and way)
+    let older: HashMap<u64, Agent> = sim.frames[i].agents.iter().map(|a| (a.id, a.clone())).collect();
+    // Motion V2: walkers stepping between the same two tiles (lockstep: V1's 7990 and 24801 inside each other for 39
+    // frames) walk on lanes across their way `[view] lane_gap_m` apart, a lane each by id (a hash's pick, the first
+    // free from it), at most `lane_count`; the lane eases in like a slot (motion.rs)
+    let lanes: HashMap<u64, Vec2> = {
+        let mut groups: HashMap<((i32, i32), (i32, i32)), Vec<u64>> = HashMap::new();
+        for a in fr_agents.iter().filter(|a| !a.indoors && a.aboard.is_none() && !still(a)) {
+            if let Some(p) = older.get(&a.id).filter(|p| !p.indoors && p.aboard.is_none()) {
+                groups.entry(((p.t[0] as i32, p.t[1] as i32), (a.t[0] as i32, a.t[1] as i32))).or_default().push(a.id);
+            }
+        }
+        let n = usize::from(cfg.lane_count.max(1));
+        let mut out = HashMap::new();
+        for ((from, to), mut ids) in groups {
+            // metres: x east, y north (tile y runs south)
+            let d = Vec2::new((to.0 - from.0) as f32, (from.1 - to.1) as f32).normalize_or(Vec2::X);
+            let across = Vec2::new(-d.y, d.x);
+            ids.sort_unstable();
+            // more walkers than lanes: rows of them, each row a gap behind the one before
+            let m = ids.len().div_ceil(n) * n;
+            let mut used = vec![false; m];
+            for id in ids {
+                let pref = (mix64(id ^ 0x1A4E_5EED) % m as u64) as usize;
+                let k = (0..m).map(|i| (pref + i) % m).find(|&k| !used[k]).unwrap_or(pref);
+                used[k] = true;
+                let (lane, row) = (k % n, k / n);
+                if std::env::var("CV_MOTION_DEBUG").is_ok_and(|v| v.split(',').any(|x| x.parse() == Ok(id & 0xFFFF_FFFF))) {
+                    eprintln!("lane {}: {from:?} -> {to:?}, lane {lane} of {n}, row {row}", id & 0xFFFF_FFFF);
+                }
+                out.insert(id, (across * (lane as f32 - (n as f32 - 1.0) / 2.0) - d * row as f32) * cfg.lane_gap_m);
+            }
+        }
+        out
+    };
     // V3: a body indoors is drawn only where the cut opens the walls: V4b, the subject's storey of the subject's
     // building while the cutaway runs (the subject indoors: its building is cut at its ceiling, the whole storey
     // shows), else inside the cut box. Every other indoor body stays hidden: drawn on its storey at its jittered tile, it stood on
@@ -1048,22 +1226,84 @@ pub fn update_sim(
     // V4: the subject's lift car (its place, z, lot)
     let mut cab: Option<(Vec2, f32, Option<crate::lots::Placed>)> = None;
     let (mut hidden_in, mut deck_miss, mut spread_n) = (0usize, 0usize, 0usize);
+    // Motion V2 (`OPEN-314`): the subject's fight on the street, staged round the subject: each foe `fight_gap_m` off
+    // it (striking range) on its own side, circling at `fight_circle_deg_s`, facing it; the subject faces its mark
+    // (the last body it struck or was struck by, the replay's poses)
+    if fight.is_empty() {
+        sim.fight_mark.clear();
+    } else {
+        sim.fight_mark.retain(|k, _| fight.contains(k));
+        for x in &poses {
+            sim.fight_mark.insert(x.key, x.toward);
+            if Some(x.toward) == subject {
+                sim.fight_mark.entry(x.toward).or_insert(x.key);
+            }
+        }
+    }
+    let subj_base: Option<[f32; 2]> = subject
+        .filter(|s| fight.iter().any(|k| k != s))
+        .and_then(|s| fr_agents.iter().find(|a| a.id == s && !a.indoors && a.aboard.is_none()))
+        .map(|a| prev_a.get(&a.id).map_or(a.t, |(p, ah)| along(*p, ah, a.t, u).0));
+    let circle = {
+        let vt = sim.lerp.map_or(0.0, |(f, t, u)| f as f64 + f64::from(u) * t.saturating_sub(f) as f64);
+        let t0 = *sim.fight_t0.get_or_insert(vt);
+        if subj_base.is_none() {
+            sim.fight_t0 = None;
+        }
+        // the game-real seconds (1x's) since the fight was first drawn
+        let secs = (vt - t0).max(0.0) / f64::from(sim.rate.max(1e-6));
+        (secs * f64::from(cfg.fight_circle_deg_s).to_radians()).rem_euclid(std::f64::consts::TAU) as f32
+    };
+    // each fighter's staged place and facing: round the subject on its own side (the bearing it comes from), the
+    // bearings spread at least `360 / n` (at most 60) deg apart in order (two on one tile are not drawn in one place),
+    // circling; a foe at `fight_gap_m` facing the subject, a friend a little wider facing its mark or the nearest foe
+    let side = sim.live.as_ref().map(|l| l.fight_side.lock().unwrap().clone()).unwrap_or_default();
+    let mut staged: HashMap<u64, (Vec2, f32)> = HashMap::new();
+    if let Some(sb) = subj_base {
+        let s_m = sim.metres(sb, 0, false);
+        let mut ring: Vec<(f32, u64)> = fr_agents
+            .iter()
+            .filter(|a| fight.contains(&a.id) && Some(a.id) != subject && !a.indoors && a.aboard.is_none())
+            .filter_map(|a| {
+                let t = prev_a.get(&a.id).map_or(a.t, |(p, ah)| along(*p, ah, a.t, u).0);
+                let d = sim.metres(t, 0, false) - s_m;
+                (d.length() < 6.0 * sim.tile_m).then(|| {
+                    let ang = if d.length() > 0.2 { d.y.atan2(d.x) } else { (unit2(a.id ^ 0xF16).0 + 0.5) * std::f32::consts::TAU };
+                    (ang, a.id)
+                })
+            })
+            .collect();
+        ring.sort_by(|x, y| x.0.total_cmp(&y.0).then(x.1.cmp(&y.1)));
+        let sep = (std::f32::consts::TAU / ring.len().max(1) as f32).min(60f32.to_radians());
+        for k in 1..ring.len() {
+            ring[k].0 = ring[k].0.max(ring[k - 1].0 + sep);
+        }
+        let foes: Vec<Vec2> = ring
+            .iter()
+            .filter(|(_, id)| !side.contains(id))
+            .map(|(ang, _)| s_m + Vec2::from_angle(ang + circle) * cfg.fight_gap_m)
+            .collect();
+        for (ang, id) in &ring {
+            let dir = Vec2::from_angle(ang + circle);
+            let (at, look) = if side.contains(id) {
+                let at = s_m + dir * cfg.fight_gap_m * 1.4;
+                let mark = sim.fight_mark.get(id).and_then(|m| sim.motion.at_of(*m));
+                let look = mark
+                    .or_else(|| foes.iter().copied().min_by(|x, y| x.distance(at).total_cmp(&y.distance(at))))
+                    .unwrap_or(s_m + dir * 3.0);
+                (at, look)
+            } else {
+                (s_m + dir * cfg.fight_gap_m, s_m)
+            };
+            let d = look - at;
+            staged.insert(*id, (at, -d.x.atan2(d.y)));
+        }
+    }
+    let mut walked_set: Option<f32> = None;
     for a in &fr_agents {
-        // T2 (§ 4): going in at a door inside the pair: on the street to the door until the newer frame, then inside
-        let entering = a.indoors && u < 1.0 && prev_out.contains_key(&a.id);
-        let walk_in;
-        let a = if entering {
-            let mut x = a.clone();
-            x.indoors = false;
-            x.b = None;
-            x.rect = None;
-            x.climb = None;
-            x.floor = prev_out[&a.id];
-            walk_in = x;
-            &walk_in
-        } else {
-            a
-        };
+        // Motion V2 (`OPEN-308`): through a door inside the pair: one walk along the street to the building's edge and
+        // on inside to its indoor spot (or out from it), `door_path`; inside the walls it shows where the cut opens
+        let door = older.get(&a.id).filter(|o| u < 1.0 && o.aboard.is_none() && a.aboard.is_none() && o.indoors != a.indoors);
         lods[a.lod as usize] += 1;
         // the way ahead's heading (compass degrees -> Bevy yaw about +y, heading 0 = -z), else the last one drawn
         let yaw =
@@ -1078,23 +1318,85 @@ pub fn update_sim(
                 }),
             };
         // Motion V1: walking or not, and the clip's rate, are the drawn ground speed's (motion.rs)
-        let draw = |at: Vec3, d: crate::motion::Drawn| crate::people::BodyDraw {
-            id: a.id,
-            at,
-            yaw: d.yaw,
-            walking: d.walking,
-            clip_rate: d.clip_rate,
-            female: a.female,
-            age: a.age,
-            dress: a.dress,
-            gang: a.gang,
-            lean: 0.0,
-            nudge: Vec2::ZERO,
-            lying: down.contains(&a.id),
+        // Motion V2: the posture (people.rs `Posing`): asleep lies, a sitting Use sits, the subject's fight guards
+        let in_fight = fight.contains(&a.id) || (Some(a.id) == subject && fight.iter().any(|k| Some(*k) != subject));
+        let draw = |at: Vec3, d: crate::motion::Drawn| {
+            let rest = !d.walking;
+            crate::people::BodyDraw {
+                id: a.id,
+                at,
+                yaw: d.yaw,
+                walking: d.walking,
+                clip_rate: d.clip_rate,
+                female: a.female,
+                age: a.age,
+                dress: a.dress,
+                gang: a.gang,
+                lean: 0.0,
+                nudge: Vec2::ZERO,
+                lying: down.contains(&a.id) || (rest && a.pose == POSE_LIE),
+                pose: crate::people::Posing {
+                    sit: if rest && a.pose == POSE_SIT { 1.0 } else { 0.0 },
+                    guard: if in_fight { 1.0 } else { 0.0 },
+                    ..Default::default()
+                },
+            }
         };
         let is_subject = Some(a.id) == subject;
         if is_subject {
             subject_in = a.aboard;
+        }
+        if let Some(o) = door {
+            let going_in = a.indoors;
+            street += 1;
+            let (path, edge, z_in, area) = sim.door_path(o, a, going_in, &stream);
+            let len = poly_len(&path);
+            // a street part longer than twice the snap a tick of the pair (a promoted body sent from its stale place,
+            // `OPEN-312`) is the sim's jump: drawn as one at the pair's middle, not a 30 m/s walk
+            let ticks = sim.lerp.map_or(1, |(f, t, _)| t.saturating_sub(f).max(1)) as f32;
+            let street_m = if going_in { poly_len(&path[..=edge]) } else { len - poly_len(&path[..=edge]) };
+            let leap = street_m > 2.0 * cfg.motion_snap_m * ticks;
+            let s = if leap { if u < 0.5 { 0.0 } else { len } } else { u * len };
+            let p = poly_at(&path, s);
+            let edge_s = poly_len(&path[..=edge]);
+            let inside = if going_in { s > edge_s } else { s < edge_s };
+            let g_edge = stream.ground_z(path[edge].x, path[edge].y).unwrap_or(0.0);
+            let z = if !inside {
+                stream.ground_z(p.x, p.y).unwrap_or(g_edge)
+            } else if going_in {
+                g_edge + (z_in - g_edge) * ((s - edge_s) / (len - edge_s).max(1e-3)).clamp(0.0, 1.0)
+            } else {
+                z_in + (g_edge - z_in) * (s / edge_s.max(1e-3)).clamp(0.0, 1.0)
+            };
+            let dir = poly_at(&path, s + 0.3) - poly_at(&path, s - 0.3);
+            let yaw = if dir.length_squared() > 1e-6 { -dir.x.atan2(dir.y) } else { yaw };
+            sim.yaw_of.insert(a.id, yaw);
+            let t = [(p.x - sim.x0) / sim.tile_m - 0.5, (sim.y1 - p.y) / sim.tile_m - 0.5];
+            let d = sim.motion.draw(a.id, p, t, Vec2::ZERO, yaw, leap || flat, false, cfg.motion_offset_m_s, &cfg);
+            no_way += usize::from(leap);
+            let at = Vec3::new(d.at.x, d.at.y, z);
+            if is_subject {
+                way_over = true;
+                if inside {
+                    subject_indoors = Some(Vec4::from(area));
+                }
+                subject_at = Some((at, d.yaw));
+                subject_body = Some(draw(at, d));
+                subj_line = format!(
+                    "subject: through a door ({}), {}",
+                    if going_in { "in" } else { "out" },
+                    if inside { "inside" } else { "outside" }
+                );
+            } else if inside && !opened(d.at) {
+                hidden_in += 1;
+            } else if sim.capsules {
+                let mat = if sim.by_lod { sim.mats[ACTS.len() + a.lod as usize].clone() } else { sim.mats[a.act as usize].clone() };
+                let cap = sim.capsule.clone();
+                place(&mut commands, &mut sim, (0, a.id), cap, mat, at_yaw(bv(at.x, at.y, at.z + 0.85 * 1.4), d.yaw));
+            } else {
+                people.push(draw(at, d));
+            }
+            continue;
         }
         if a.indoors {
             // T2: the click way ends at a door gone through (or a ride)
@@ -1144,7 +1446,7 @@ pub fn update_sim(
                 subj_line = subject_line(a, f, z, pl, &sim.lots);
                 subj_line += &own_cut.map_or(", kit cut: none".to_string(), |(b, fl)| format!(", kit cut: building {b} at its floor {fl}"));
             }
-            let d = sim.motion.draw(a.id, p, a.t, Vec2::ZERO, yaw, flat, &cfg);
+            let d = sim.motion.draw(a.id, p, a.t, Vec2::ZERO, yaw, flat, false, cfg.motion_offset_m_s, &cfg);
             let p = if cab.is_some() && is_subject { p } else { d.at };
             if is_subject {
                 subject_at = Some((Vec3::new(p.x, p.y, z), d.yaw));
@@ -1169,6 +1471,21 @@ pub fn update_sim(
         *on_tile.entry((a.t[0] as i32, a.t[1] as i32)).or_default() += 1;
         let (mut t, jump) = prev_a.get(&a.id).map_or((a.t, false), |(p, ah)| along(*p, ah, a.t, u));
         no_way += usize::from(jump);
+        // Motion V2 (S1's stride, `OPEN-317`): each frame's place is its tile plus the way through the next step, so
+        // the pair covers the same ground every tick (the tiles alone ran 4, 3, 4 a tick: a 25 % surge)
+        if !jump {
+            let off = |s: &HashMap<u64, f32>, g: Option<&Agent>| {
+                g.and_then(|g| {
+                    let k = *s.get(&g.id)?;
+                    let n = *g.ahead.first()?;
+                    let d = [n[0] - g.t[0], n[1] - g.t[1]];
+                    (d[0].abs().max(d[1].abs()) <= 1.5).then_some([d[0] * k, d[1] * k])
+                })
+                .unwrap_or([0.0, 0.0])
+            };
+            let (o, n) = (off(&sim.strides[0], older.get(&a.id)), off(&sim.strides[1], Some(a)));
+            t = [t[0] + o[0] + (n[0] - o[0]) * u, t[1] + o[1] + (n[1] - o[1]) * u];
+        }
         // T2 (§ 5): the subject on its click way walks it from the click, until the frames reach its end or leave it
         let mut yaw = yaw;
         if is_subject && let Some((_, way, walked, _)) = click_way.as_ref() {
@@ -1182,7 +1499,13 @@ pub fn update_sim(
             if !on_way || done {
                 way_over = true;
             } else {
-                let d = *walked;
+                // Motion V2 (`OPEN-315`): the drawn walk never behind the frames' own lerp (a sim run on ahead, flat
+                // out to a script's line, takes it along) nor more than `way_lead_tiles` past the sim's newer tile (a
+                // sim holding the body at a segment's end or a door holds the drawn one)
+                let lo = arc_at(path, t);
+                let hi = arc_at(path, a.t) + cfg.way_lead_tiles;
+                let d = walked.min(hi).max(lo);
+                walked_set = Some(d);
                 let w = walk_along(path[0], &path[1..], 0.0, Some(d));
                 let ahead = walk_along(path[0], &path[1..], 0.0, Some(d + 0.5));
                 let (dx, dy) = (ahead[0] - w[0], w[1] - ahead[1]);
@@ -1196,20 +1519,67 @@ pub fn update_sim(
         // V4: a crowd standing on one tile in its slots round it (`Sim::slots`), else a lane's jitter in the tile;
         // Motion V1: the offset eased, the drawn place kept from jumping (motion.rs)
         let base = sim.metres(t, a.id, false);
-        let want = match slots.get(&a.id) {
-            Some(q) => {
+        let mut want = match (slots.get(&a.id), lanes.get(&a.id)) {
+            (Some(q), _) => {
                 spread_n += 1;
                 *q - base
             }
-            None => sim.metres(t, a.id, true) - base,
+            // Motion V2: a walker on its lane
+            (None, Some(l)) => *l,
+            (None, None) => sim.metres(t, a.id, true) - base,
         };
-        let d = sim.motion.draw(a.id, base, t, want, yaw, jump || flat, &cfg);
+        // Motion V2 (`OPEN-314`): the subject's fight staged round the subject (above): a foe at striking range on its
+        // side, circling, facing the subject; the subject on its tile, facing its mark
+        let mut face = false;
+        let mut ease = cfg.motion_offset_m_s;
+        if let Some(sb) = subj_base.filter(|_| is_subject || fight.contains(&a.id)) {
+            let s_m = sim.metres(sb, 0, false);
+            if is_subject {
+                want = Vec2::ZERO;
+                // its mark's staged place, else the nearest foe's (the staged ring, then where the foe is drawn)
+                let near = |k: &u64| staged.get(k).map(|s| s.0).or_else(|| sim.motion.at_of(*k));
+                let mark = sim.fight_mark.get(&a.id).filter(|m| !side.contains(m)).and_then(near).or_else(|| {
+                    fight
+                        .iter()
+                        .filter(|k| **k != a.id && !side.contains(k))
+                        .filter_map(near)
+                        .min_by(|x, y| x.distance(s_m).total_cmp(&y.distance(s_m)))
+                });
+                if let Some(m) = mark.filter(|m| m.distance(s_m) > 0.05) {
+                    let d = m - s_m;
+                    yaw = -d.x.atan2(d.y);
+                    face = true;
+                }
+            } else if let Some((at, look)) = staged.get(&a.id) {
+                want = *at - base;
+                yaw = *look;
+                ease = cfg.fight_close_m_s;
+                face = true;
+            }
+        } else if let Some(sb) = subj_base.filter(|_| still(a))
+            && Vec2::from(sb).distance(Vec2::from(a.t)) <= f32::from(sim.stir_tiles)
+        {
+            // Motion V2 (S2's stir): a body standing near the subject's fight watches it
+            let d = sim.metres(sb, 0, false) - (base + want);
+            if d.length() > 0.3 {
+                yaw = -d.x.atan2(d.y);
+                face = true;
+            }
+        }
+        // Motion V2 (`OPEN-309`): off the El inside the pair: from its seat in the car to its place on the platform
+        let seat = sim.seat_at.get(&a.id).copied().filter(|_| u < 1.0 && older.get(&a.id).is_some_and(|o| o.aboard.is_some()));
+        let (base, want) = match seat {
+            Some(s) => (s.truncate().lerp(base + want, u), Vec2::ZERO),
+            None => (base, want),
+        };
+        let d = sim.motion.draw(a.id, base, t, want, yaw, (jump && seat.is_none()) || flat, face, ease, &cfg);
         let (p, yaw) = (d.at, d.yaw);
         let g = stream.ground_z(p.x, p.y).unwrap_or(0.0);
         // C7: a body on a walkway deck stands on it (no deck point within 12 m: at the storey's height, counted)
         let deck = if a.floor > 0.0 { sim.deck_z(p) } else { None };
         deck_miss += usize::from(a.floor > 0.0 && deck.is_none());
         let z = if a.floor > 0.0 { deck.unwrap_or(g + Sim::storey_z(a.floor)) } else { g };
+        let z = seat.map_or(z, |s| s.z + (z - s.z) * u);
         if is_subject {
             subject_at = Some((Vec3::new(p.x, p.y, z), yaw));
             subject_body = Some(draw(Vec3::new(p.x, p.y, z), d));
@@ -1257,6 +1627,12 @@ pub fn update_sim(
         }
     }
     sim.subject_indoors = subject_indoors;
+    // Motion V2 (`OPEN-315`): the click way's drawn walk as clamped to the frames this frame
+    if let (Some(d), Some(w)) = (walked_set, sim.way.as_mut())
+        && click_way.as_ref().map(|c| c.0) == Some(w.0)
+    {
+        w.2 = d;
+    }
     if way_over && sim.way.as_ref().map(|w| w.0) == click_way.as_ref().map(|w| w.0) {
         sim.way = None;
     }
@@ -1270,6 +1646,13 @@ pub fn update_sim(
     });
     let mut watch_at: Option<(Vec3, f32)> = None;
     let (mut by_ride, mut riders, mut riders_drawn) = ([0usize; 5], 0usize, 0usize);
+    // Motion V2 (`OPEN-309`): the riders' seats this frame (a rider getting off inside the pair keeps the last one)
+    let mut seats: HashMap<u64, Vec3> = sim
+        .seat_at
+        .iter()
+        .filter(|(k, _)| u < 1.0 && fr_agents.iter().any(|a| a.id == **k && a.aboard.is_none()))
+        .map(|(k, v)| (*k, *v))
+        .collect();
     for v in &fr_veh {
         by_ride[v.ride as usize] += 1;
         riders += usize::from(v.riders);
@@ -1368,10 +1751,29 @@ pub fn update_sim(
                     lean: 0.0,
                     nudge: Vec2::ZERO,
                     lying: false,
+                    // Motion V2: riders stand (the car has no seats to sit on)
+                    pose: Default::default(),
                 };
                 riders_drawn += 1;
+                seats.insert(id, pos.extend(z));
+                // Motion V2 (`OPEN-309`): on the El inside the pair: a walk from its place on the platform to the seat
+                let mut bd = bd;
+                if u < 1.0
+                    && let Some(o) = older.get(&id).filter(|o| o.aboard.is_none() && !o.indoors)
+                {
+                    let from = sim.metres(o.t, id, false);
+                    let fz = if o.floor > 0.0 { sim.deck_z(from) } else { stream.ground_z(from.x, from.y) }.unwrap_or(z);
+                    let at = from.extend(fz).lerp(bd.at, u);
+                    let dir = bd.at.truncate() - from;
+                    if dir.length() > 0.5 {
+                        bd.yaw = -dir.x.atan2(dir.y);
+                        bd.walking = true;
+                        bd.clip_rate = 1.5;
+                    }
+                    bd.at = at;
+                }
                 if Some(id) == subject {
-                    subject_at = Some((pos.extend(z), yaw_b));
+                    subject_at = Some((bd.at, bd.yaw));
                     subject_body = Some(bd);
                     let line = v.line.and_then(|l| sim.line_names.get(usize::from(l))).map_or("El", |s| s.as_str());
                     subj_line = format!(
@@ -1412,6 +1814,7 @@ pub fn update_sim(
         let mesh = sim.boxes[v.ride as usize].clone();
         place(&mut commands, &mut sim, (1, v.id), mesh, mat, at_yaw(bv(p.x, p.y, z), yaw));
     }
+    sim.seat_at = seats;
     // C5: the replay's poses: a lunge at the struck, a stagger away from the striker (and the striker faces its mark)
     if !poses.is_empty() {
         // Motion V1: on the pacing's clock (play.rs `replay` lays the poses on it; a film's own while one runs)
@@ -1444,13 +1847,16 @@ pub fn update_sim(
             if b.lying {
                 continue;
             }
+            // Motion V2: and on the rig, a strike (the right arm at the mark, the spine in) or a stagger (`Posing`)
             if x.lunge {
                 b.nudge = dir * reach * k;
                 b.lean = deg * k;
                 b.yaw = -dir.x.atan2(dir.y);
+                b.pose.strike = k;
             } else {
                 b.nudge = -dir * reach * 0.8 * k;
                 b.lean = -deg * 0.8 * k;
+                b.pose.stagger = k;
             }
         }
     }
@@ -1600,7 +2006,8 @@ pub fn follow_subject(sim: Res<Sim>, mut player: ResMut<crate::occ::Player>, mut
         // C5: the subject's pose (a lunge, a stagger, lying knocked out)
         match sim.subject_body.as_ref() {
             Some(b) => {
-                player.tilt = b.tilt();
+                // Motion V2: the stand-in is rigged (its lean is in its spine), the capsule is not
+                player.tilt = if sim.capsules { b.tilt() } else { b.rig_tilt() };
                 player.nudge = b.feet() - b.at;
                 player.facing = b.yaw;
             }

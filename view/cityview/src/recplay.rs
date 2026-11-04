@@ -84,6 +84,7 @@ fn run(a: RecArgs, sh: Arc<Shared>) {
         north_m: h.north_m as f32,
         // a recording carries no crossings (city-simrec/0.1): no signal heads in a replay (OPEN-260's leftovers)
         crossings: Vec::new(),
+        stir_tiles: 0,
     });
     eprintln!(
         "cityview: playing {} ({} {} #{}, diary day {}, from frame {}) at {rate:.4} ticks/s ({:.1} s)",
@@ -128,6 +129,7 @@ fn run(a: RecArgs, sh: Arc<Shared>) {
                 from_tick,
                 span_s,
                 clocked: false,
+                strides: Default::default(),
             });
             s.prev = s.latest.take();
             s.latest = Some(p);

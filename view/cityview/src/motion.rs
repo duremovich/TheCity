@@ -17,6 +17,9 @@
 //!   `walk_off_m_s`) the walk clip plays at the drawn speed over `walk_clip_m_s`, clamped to `walk_clip_rate_min` ..
 //!   `walk_clip_rate_max` (a 60x walk would cycle the legs 60 times a second); a body stood still idles.
 //!
+//! - Motion V2: a fighter faces its foe whatever it does (`face`); sim.rs stages the fight, lays walkers on lanes and
+//!   walks a door's way (`Sim::door_path`).
+//!
 //! A body not drawn in a frame (indoors out of the cut, aboard, out of the ring) loses its track: it comes back fresh.
 //! `CV_MOTION_DEBUG=INDEX,INDEX` logs those bodies' tracks every frame (base, offset, raw, speed, gap, snap).
 
@@ -88,7 +91,9 @@ impl Motion {
 
     /// Body `id` drawn this frame: `base` its lerped place on the tile centre line (metres; `base_t` the same in
     /// tiles), `want` the offset sim.rs asks for, `heading` the sim's (a standing body faces it), `jump` the sim's own
-    /// placement (drawn as one).
+    /// placement (drawn as one); Motion V2: `face`, the body turns to `heading` whatever it does (a fighter faces its
+    /// foe as it steps in); `ease_m_s` the offset's pace (`motion_offset_m_s`; a fighter closing in, `fight_close_m_s`).
+    #[allow(clippy::too_many_arguments)]
     pub fn draw(
         &mut self,
         id: u64,
@@ -97,6 +102,8 @@ impl Motion {
         want: Vec2,
         heading: f32,
         jump: bool,
+        face: bool,
+        ease_m_s: f32,
         c: &citysim::config::ViewCfg,
     ) -> Drawn {
         let (dt, sx, frame) = (self.dt, self.speed_x, self.frame);
@@ -127,7 +134,7 @@ impl Motion {
         t.base_t = base_t;
         // the offset eases toward the one asked
         let d = want - t.off;
-        let step = c.motion_offset_m_s * sx.sqrt() * dt;
+        let step = ease_m_s * sx.sqrt() * dt;
         t.off = if d.length() <= step { want } else { t.off + d.normalize() * step };
         let raw = base + t.off;
         // the guard: a step of the raw place past `motion_jump_k` x the faster of the walk and its own last speed (a
@@ -168,6 +175,7 @@ impl Motion {
         // the facing turns toward the way walked (the base's: a body stepping into its crowd slot or closing a gap
         // sidesteps facing on); standing, the sim's heading; walking with no step this frame, as it was
         let goal = match (t.walking, along.length_squared() > 1e-8) {
+            _ if face => heading,
             (true, true) => -along.x.atan2(along.y),
             (false, true) => t.yaw,
             (true, false) if moved.length_squared() > 1e-8 => t.yaw,
@@ -178,11 +186,12 @@ impl Motion {
         t.yaw = wrap(t.yaw + turn.clamp(-max, max));
         if std::env::var("CV_MOTION_DEBUG").is_ok_and(|v| v.split(',').any(|x| x.parse() == Ok(id & 0xFFFF_FFFF))) {
             eprintln!(
-                "motion {}: frame {frame} dt {dt:.3} sx {sx:.1} base {base:?} want {want:?} off {:?} raw {raw:?} leap {leap:.2} vel {:?} err {:?} at {at:?} snap {snap} jump {jump}",
+                "motion {}: frame {frame} dt {dt:.3} sx {sx:.1} base {base:?} want {want:?} off {:?} raw {raw:?} leap {leap:.2} vel {:?} err {:?} at {at:?} snap {snap} jump {jump} face {face} heading {heading:.2} yaw {:.2}",
                 id & 0xFFFF_FFFF,
                 t.off,
                 t.vel,
-                t.err
+                t.err,
+                t.yaw
             );
         }
         t.raw = raw;
@@ -190,6 +199,11 @@ impl Motion {
         let clip_rate =
             if t.walking { (t.speed / c.walk_clip_m_s.max(0.1)).clamp(c.walk_clip_rate_min, c.walk_clip_rate_max) } else { 1.0 };
         Drawn { at, yaw: t.yaw, walking: t.walking, clip_rate }
+    }
+
+    /// Motion V2: where body `id` was drawn last (metres).
+    pub fn at_of(&self, id: u64) -> Option<Vec2> {
+        self.tracks.get(&id).map(|t| t.at)
     }
 
     /// The base (tiles) body `id` was drawn on last frame.
