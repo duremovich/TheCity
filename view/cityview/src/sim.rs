@@ -203,6 +203,8 @@ pub struct Sim {
     pub fight_t0: Option<f64>,
     /// Motion V2: the pair's strides (`simthread::Published::strides`), older and newer
     pub strides: [HashMap<u64, f32>; 2],
+    /// R4: the pair's walkway hops under way (`simthread::Published::hops`), older and newer
+    pub hops: [HashMap<u64, citysim::exec::HopSpan>; 2],
     /// Motion V2 (`OPEN-309`): where each El rider was drawn last (its seat), for the walk off the car
     pub seat_at: HashMap<u64, Vec3>,
     /// Motion V2: S2's `[combat] stir_tiles` (`simthread::Static`): a body standing this near the subject's fight
@@ -602,6 +604,7 @@ impl Sim {
             fight_mark: HashMap::new(),
             fight_t0: None,
             strides: Default::default(),
+            hops: Default::default(),
             seat_at: HashMap::new(),
             stir_tiles: 8,
             rails,
@@ -658,6 +661,7 @@ impl Sim {
             fight_mark: HashMap::new(),
             fight_t0: None,
             strides: Default::default(),
+            hops: Default::default(),
             seat_at: HashMap::new(),
             stir_tiles: 8,
             rails,
@@ -695,6 +699,7 @@ impl Sim {
             let older = prev.as_ref().unwrap_or(&latest);
             self.frames = vec![SimFrame::from_view(&older.frame), SimFrame::from_view(&latest.frame)];
             self.strides = [older.strides.clone(), latest.strides.clone()];
+            self.hops = [older.hops.clone(), latest.hops.clone()];
             self.live_seq = latest.seq;
             self.subject = Some(ekey(latest.subject));
             self.caption = latest.caption.clone();
@@ -1491,7 +1496,28 @@ pub fn update_sim(
         no_way += usize::from(jump);
         // Motion V2 (S1's stride, `OPEN-317`): each frame's place is its tile plus the way through the next step, so
         // the pair covers the same ground every tick (the tiles alone ran 4, 3, 4 a tick: a 25 % surge)
-        if !jump {
+        // R4 (`OPEN-319`): a walkway hop (stairs, a lift, a deck's span) in either frame of the pair: each frame's place
+        // is the hop's near end plus its share gone toward the far end (the sim stands the body on the near end the
+        // hop's time and steps it onto the far end when the share completes), and its height the same share between
+        // the two ends' (`hop_z` below); the pair lerps from one frame's place to the other's
+        let hop_of = |k: usize, g: Option<&Agent>| -> Option<([f32; 2], f32, f32)> {
+            let g = g?;
+            match sim.hops[k].get(&g.id) {
+                Some(h) => {
+                    let s = h.share.clamp(0.0, 1.0);
+                    let (f, e) = ([f32::from(h.from.x), f32::from(h.from.y)], [f32::from(h.to.x), f32::from(h.to.y)]);
+                    Some(([f[0] + (e[0] - f[0]) * s, f[1] + (e[1] - f[1]) * s], f32::from(h.from_level), s))
+                }
+                None => Some((g.t, g.floor, -1.0)),
+            }
+        };
+        let hopping = sim.hops[0].contains_key(&a.id) || sim.hops[1].contains_key(&a.id);
+        let mut hop_z: Option<[(f32, [f32; 2], f32); 2]> = None;
+        if hopping && let (Some(o), Some(n)) = (hop_of(0, older.get(&a.id)), hop_of(1, Some(a))) {
+            t = [o.0[0] + (n.0[0] - o.0[0]) * u, o.0[1] + (n.0[1] - o.0[1]) * u];
+            hop_z = Some([(o.1, o.0, o.2), (n.1, n.0, n.2)]);
+        }
+        if !jump && !hopping {
             let off = |s: &HashMap<u64, f32>, g: Option<&Agent>| {
                 g.and_then(|g| {
                     let k = *s.get(&g.id)?;
@@ -1599,6 +1625,27 @@ pub fn update_sim(
         let deck = if a.floor > 0.0 { sim.deck_z(p) } else { None };
         deck_miss += usize::from(a.floor > 0.0 && deck.is_none());
         let z = if a.floor > 0.0 { deck.unwrap_or(g + Sim::storey_z(a.floor)) } else { g };
+        // R4: a hop's height: each frame's (a hop's share between its near end's and its far end's), lerped
+        let z = match hop_z {
+            Some(fr) => {
+                let at = |t: [f32; 2], fl: f32| {
+                    let m = sim.metres(t, 0, false);
+                    let g = stream.ground_z(m.x, m.y).unwrap_or(0.0);
+                    if fl > 0.0 { sim.deck_z(m).unwrap_or(g + Sim::storey_z(fl)) } else { g }
+                };
+                let zk = |k: usize, (fl, pl, s): (f32, [f32; 2], f32)| match sim.hops[k].get(&a.id) {
+                    Some(h) if s >= 0.0 => {
+                        let near = at([f32::from(h.from.x), f32::from(h.from.y)], f32::from(h.from_level));
+                        let far = at([f32::from(h.to.x), f32::from(h.to.y)], f32::from(h.to_level));
+                        near + (far - near) * s
+                    }
+                    _ => at(pl, fl),
+                };
+                let (z0, z1) = (zk(0, fr[0]), zk(1, fr[1]));
+                z0 + (z1 - z0) * u
+            }
+            None => z,
+        };
         let z = seat.map_or(z, |s| s.z + (z - s.z) * u);
         if is_subject {
             subject_at = Some((Vec3::new(p.x, p.y, z), yaw));
@@ -1857,6 +1904,9 @@ pub fn update_sim(
                 continue;
             }
             let dir = d.normalize();
+            // R4: a beat's two swings lunge both bodies at once: each closes at most half the room left over
+            // `lunge_sep_m`, so the pair never meets through one another (the staged gap is 1 m, two lunges 0.9)
+            let reach = reach.min(((d.length() - sim.cfg.lunge_sep_m) * 0.5).max(0.0));
             let k = (u * std::f32::consts::PI).sin();
             let b = if subject_body.as_ref().is_some_and(|b| b.id == x.key) {
                 subject_body.as_mut()

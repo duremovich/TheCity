@@ -130,6 +130,7 @@ fn run(a: RecArgs, sh: Arc<Shared>) {
                 span_s,
                 clocked: false,
                 strides: Default::default(),
+                hops: Default::default(),
             });
             s.prev = s.latest.take();
             s.latest = Some(p);

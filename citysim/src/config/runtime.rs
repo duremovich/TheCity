@@ -229,6 +229,9 @@ pub struct ViewCfg {
     pub lunge_s: f32,
     pub lunge_m: f32,
     pub lunge_deg: f32,
+    /// R4: two bodies' lunges and staggers never bring them nearer than this (metres; a beat's two swings lunged
+    /// both into each other and the staged pair met through one another).
+    pub lunge_sep_m: f32,
     /// C5 (`OPEN-297`): indoors, the bodies of the subject's fight stand
     /// round it this far (metres), facing it (the view's indoor place is a
     /// jitter across the room).
@@ -259,6 +262,13 @@ pub struct ViewCfg {
     /// M18 P5: a play script's `provoke lethal` (a proof's cheat, never the
     /// player's): the fight's kill chance on a loss.
     pub provoke_kill_p: f32,
+    /// R4: a `provoke` with nobody on foot at hand (`[combat] join_tiles`) has the nearest Full adult on foot on
+    /// the street within this many tiles walk up (`combat::come_for`) ...
+    pub provoke_reach_tiles: u16,
+    /// ... and go for the subject once within this many tiles of it (Chebyshev), giving up after
+    /// `provoke_wait_ticks`.
+    pub provoke_at_tiles: u16,
+    pub provoke_wait_ticks: u16,
 }
 
 impl Default for ViewCfg {
@@ -392,6 +402,7 @@ impl Default for ViewCfg {
             cue_s: 1.2,
             lunge_s: 0.45,
             lunge_m: 0.45,
+            lunge_sep_m: 0.55,
             lunge_deg: 18.0,
             fight_ring_m: 1.3,
             autopause: true,
@@ -404,6 +415,9 @@ impl Default for ViewCfg {
             trail_max_ticks: 60,
             trail_repair_tiles: 64,
             provoke_kill_p: 1.0,
+            provoke_reach_tiles: 48,
+            provoke_at_tiles: 1,
+            provoke_wait_ticks: 30,
         }
     }
 }

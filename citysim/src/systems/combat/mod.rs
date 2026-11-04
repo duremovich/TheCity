@@ -78,6 +78,7 @@ pub use duel::*;
 pub use fighter::*;
 pub use odds::*;
 pub use orders::*;
+pub use stir::come_for;
 pub use view::*;
 pub use wounds::*;
 
